@@ -1,7 +1,7 @@
 # 按间距中的绿色按钮以运行脚本。
 from io import BytesIO
-
-from Day1.services import DivideProtocol, MethodProtocol
+from services import DivideProtocol
+from services import MethodProtocol
 
 if __name__ == '__main__':
     # 构造消息数据

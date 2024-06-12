@@ -1,5 +1,11 @@
 import struct
 from io import BytesIO
+import socket
+
+
+class InvalidOperation(Exception):
+    def __init__(self, message=None):
+        self.message = message or 'Invalid operation'
 
 
 class MethodProtocol(object):
@@ -55,6 +61,7 @@ class MethodProtocol(object):
         buff = self._read_all(length)
         name = buff.decode()
         return name
+
 
 class DivideProtocol(object):
     """
@@ -206,11 +213,90 @@ class DivideProtocol(object):
         :return: bytes 消息协议二进制数据
         """
 
+        # 正常的情况
 
-        #正常的情况
-
-        if isinstance(result,float):
-            pass
-        #异常的情况
+        if isinstance(result, float): \
+                # 处理正常返回值类型
+            buff = struct.pack('!B', 1)
+            buff += struct.pack('!f', result)
+            return buff
+        # 异常的情况
         else:
-            pass
+            # 处理异常返回值类型
+            buff = struct.pack('!B', 2)
+            length = len(result.message)
+            # 处理字符串长度
+            buff += struct.pack('!I', length)
+            buff += result.message.encode('utf-8')
+            return buff
+
+    def result_decode(self, connection):
+        """
+        将返回值消息数据转为原始返回值
+        :param connection: socket BytesIO
+        :return: float InvalidOperation对象
+        """
+        self.conn = connection  # self._read_all(1)需要self.conn
+        # 处理返回值类型
+        buff = self._read_all(1)
+        result_type = struct.unpack('!B', buff)[0]
+        if result_type == 1:
+            # 正常
+            # 读取float数据
+            buff = self._read_all(4)
+            val = struct.unpack('!f', buff)[0]
+            return val
+        elif result_type == 2:
+            # 异常
+            # 读取字符串长度
+            # 读取字符串
+            buff = self._read_all(4)
+            length = struct.unpack('!I', buff)[0]
+            buff = self._read_all(length)
+            message = buff.decode('utf-8')
+            return InvalidOperation(message)
+
+
+class Channel(object):
+    """
+    用于客户端简历网络连接
+    """
+
+    def __init__(self, host, port):
+        """
+
+        :param host:服务器地址
+        :param port: 服务器端口号
+        """
+        self.host = host
+        self.port = port
+
+    def get_connection(self):
+        """
+        获取连接对象
+        :return: 与服务器通讯的socket
+        """
+
+        # AF_INET ipv4
+        # SOCK_STREAM TCP
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.connect((self.host, self.port))
+        return sock
+
+
+class Server(object):
+    """
+    PRC服务器
+    """
+
+    def __init__(self, host, port):
+        # 创建socket工具对象
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # 设置socket 重用地址
+        # SOL_SOCKET：sockt的本身的级别、SO_REUSEADDR：重用地址
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+        sock.bind((host, port))
+        self.host = host
+        self.port = port
+        self.sock = sock

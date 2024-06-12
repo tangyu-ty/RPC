@@ -1,0 +1,5 @@
+
+最新的github取消了账号密码登录
+所以你需要准备2件事
+1、利用令牌登录账号,GUI操作（用jetbrains权限验证的方法登录无法share项目到github）
+2、利用git生成本地公钥（ssh-keygen -t rsa -C "youremail@example.com"），并添加到github上。windows下文件在C:\Users\laodi\.ssh(laodi是用户名)

@@ -1,4 +1,5 @@
 import struct
+import threading
 from io import BytesIO
 import socket
 
@@ -160,8 +161,6 @@ class DivideProtocol(object):
 
         self.conn = connection
 
-        # todo 处理方法名
-
         # 处理消息边界
 
         # 读取二进制数据
@@ -189,11 +188,11 @@ class DivideProtocol(object):
         param = struct.unpack(param_fmt, buff)[0]
         param_name = param_name_map[param_seq]
         args[param_name] = param
-
         if have >= length:
             return args
         # 处理第二个参数
         # 处理序号
+
         buff = self._read_all(1)
         param_seq = struct.unpack('!B', buff)[0]
 
@@ -289,7 +288,7 @@ class Server(object):
     PRC服务器
     """
 
-    def __init__(self, host, port):
+    def __init__(self, host, port, handlers):
         # 创建socket工具对象
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         # 设置socket 重用地址
@@ -300,3 +299,171 @@ class Server(object):
         self.host = host
         self.port = port
         self.sock = sock
+        self.handlers = handlers
+
+    def server(self):
+        """
+        开启服务器运行，提供RPC服务
+        :return:
+        """
+
+        # 开启服务器的监听，等待客户端的连接请求
+        self.sock.listen(128)
+        print("服务器开启监听")
+        # 接受客户端的连接请求
+        while True:
+            client_sock, client_addr = self.sock.accept()
+            print('与客户端%s建立了连接' % str(client_addr))
+
+            # 交给ServerStub，完成客户端的具体RPC调用请求
+            stub = ServerStub(client_sock, self.handlers)
+            try:
+                while True:
+                    stub.process()
+            except EOFError:
+                # 表示客户端关闭了连接
+                print("客户端关闭了连接")
+                client_sock.close()
+
+
+class ThreadServer(object):
+    """
+    多线程PRC服务器
+    """
+
+    def __init__(self, host, port, handlers):
+        # 创建socket工具对象
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # 设置socket 重用地址
+        # SOL_SOCKET：sockt的本身的级别、SO_REUSEADDR：重用地址
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+        sock.bind((host, port))
+        self.host = host
+        self.port = port
+        self.sock = sock
+        self.handlers = handlers
+
+    def server(self):
+        """
+        开启服务器运行，提供RPC服务
+        :return:
+        """
+
+        # 开启服务器的监听，等待客户端的连接请求
+        self.sock.listen(128)
+        print("服务器开启监听")
+        # 接受客户端的连接请求
+        while True:
+            client_sock, client_addr = self.sock.accept()
+            print('与客户端%s建立了连接' % str(client_addr))
+            # 创建子线程处理客户端
+            thread = threading.Thread(target=self.handle, args=(client_sock,))
+            thread.start()
+    def handle(self, client_sock):
+        """
+        子线程调用的方法，用户处理一个客户端的请求
+        :return:
+        """
+
+        # 交给ServerStub，完成客户端的具体RPC调用请求
+        stub = ServerStub(client_sock, self.handlers)
+        try:
+            while True:
+                stub.process()
+        except EOFError:
+            # 表示客户端关闭了连接
+            print("客户端关闭了连接")
+            client_sock.close()
+
+
+
+class ClientStub(object):
+    """
+    用来帮助客户端能完成远程过程调用 RPC调用
+    stub = ClientStub()
+    stub.divide()
+    """
+
+    def __init__(self, channel):
+        self.channel = channel
+        self.conn = self.channel.get_connection()
+
+    def divide(self, num1, num2=1):
+        # 将调用的参数打包成消息协议的数据
+        proto = DivideProtocol()
+        args = proto.args_encode(num1, num2)
+
+        # 将消息数据通过网络发送给服务器
+
+        self.conn.sendall(args)
+
+        # 接受服务器返回的返回值消息数据，并进行解析
+
+        result = proto.result_decode(self.conn)
+
+        # 将结果值(正常float 或者异常InvalidOperation)返回给客户端
+
+        if isinstance(result, float):
+            # 正常情况
+            return result
+        else:
+            raise result
+
+        # def add(self):
+        #     pass
+
+
+class ServerStub(object):
+    """
+    帮助服务器完成远程过程调用
+    """
+
+    def __init__(self, connection, handlers):
+        """
+
+        :param connection: 与客户端的连接
+        :param handlers: 真正本地被调用的方法
+        class Handler(object):
+            def divide(self, num1, num2=1):
+                pass
+            @staticmethod
+            def add(self, num1, num2=1):
+                pass
+        """
+        self.conn = connection
+        self.method_proto = MethodProtocol(self.conn)
+        self.process_map = {
+            'divide': self._process_divide
+        }
+        self.handlers = handlers
+
+    def process(self):
+        """
+        当服务端接受了一个客户端的连接，建立好连接后进行远端调用
+        :return:
+        """
+
+        # 接受消息数据，并解析方法的名字
+        name = self.method_proto.get_method_name()
+        # 根据解析获得的方法（过程）名，调用相应的过程协议，接受并解析消息数据。
+        self.process_map[name]()
+
+    def _process_divide(self):
+        # 创建用于除法过程的调用参数协议数据解析的工具
+        proto = DivideProtocol()
+        # 解析调用参数消息数据
+        args = proto.args_decode(self.conn)
+
+        # 除法的本地调用
+        try:
+            val = self.handlers.divide(**args)
+        except InvalidOperation as e:
+            ret_message = proto.result_encode(e)
+        else:
+            ret_message = proto.result_encode(val)
+        self.conn.sendall(ret_message)
+        # 将本地调用的返回值打包成消息协议的数据，通过网络返回给客户端
+
+    def _process_add(self):
+        pass

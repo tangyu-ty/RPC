@@ -11,4 +11,4 @@ class Handlers(object):
 
 if __name__ == '__main__':
     _server = ThreadServer('127.0.0.1', 8000, Handlers)
-    _server.server()
+    _server.serve()

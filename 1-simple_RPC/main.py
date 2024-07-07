@@ -3,6 +3,8 @@ from io import BytesIO
 from services import DivideProtocol
 from services import MethodProtocol
 
+#test
+
 if __name__ == '__main__':
     # 构造消息数据
     proto = DivideProtocol()
